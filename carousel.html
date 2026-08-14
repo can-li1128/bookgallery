@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Library 7-Book Cover Carousel</title>
+
+  <!-- SheetJS Library for reading Excel files -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --carousel-width: 100%;
+      --card-gap: 12px;
+      --visible-cards: 7; /* Display exactly 7 images simultaneously */
+    }
+
+    .book-carousel-wrapper {
+      width: var(--carousel-width);
+      max-width: 1200px;
+      margin: 2rem auto;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .carousel-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #1a1a1a;
+      text-align: center;
+    }
+
+    /* Track displaying 7 cards side-by-side */
+    .carousel-track {
+      display: flex;
+      gap: var(--card-gap);
+      overflow-x: auto;
+      scroll-behavior: smooth;
+      scroll-snap-type: x mandatory;
+      padding: 1rem 0.5rem;
+      scrollbar-width: thin;
+    }
+
+    .carousel-track::-webkit-scrollbar {
+      height: 6px;
+    }
+
+    .carousel-track::-webkit-scrollbar-thumb {
+      background: #ccc;
+      border-radius: 3px;
+    }
+
+    /* Book Card Layout */
+    .book-card {
+      /* Calculate width so exactly 7 items fit taking gaps into account */
+      flex: 0 0 calc((100% - (var(--card-gap) * (var(--visible-cards) - 1))) / var(--visible-cards));
+      min-width: 110px;
+      scroll-snap-align: start;
+      text-decoration: none;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      background-color: #f5f5f5;
+      display: block;
+    }
+
+    /* Enlarge image on mouse hover */
+    .book-card:hover {
+      transform: scale(1.18);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+      z-index: 10;
+    }
+
+    .book-cover-container {
+      width: 100%;
+      padding-top: 150%; /* Aspect ratio ~ 2:3 */
+      position: relative;
+    }
+
+    .book-cover-img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .status-msg {
+      width: 100%;
+      text-align: center;
+      padding: 2rem;
+      color: #666;
+      font-style: italic;
+    }
+
+    /* Responsive scaling for mobile devices */
+    @media (max-width: 900px) {
+      :root { --visible-cards: 5; }
+    }
+    @media (max-width: 600px) {
+      :root { --visible-cards: 3; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="book-carousel-wrapper" id="carouselContainer">
+    <h2 class="carousel-title">Featured Titles</h2>
+    <div class="carousel-track" id="carouselTrack" role="region" aria-label="Book Carousel">
+      <div class="status-msg" id="statusMsg">Loading covers from book-150d.xlsx...</div>
+    </div>
+  </div>
+
+  <script>
+    // Configuration: Targets the specific Excel file in the same directory
+    const EXCEL_FILE_PATH = 'book-150d.xlsx';
+    const SYNDETICS_CLIENT_CODE = 'primo'; // Replace with your Syndetics client code if applicable
+
+    let autoRotateInterval = null;
+
+    // Load and Parse the Excel File
+    async function loadBooksAndBuildCarousel() {
+      const track = document.getElementById('carouselTrack');
+      const statusMsg = document.getElementById('statusMsg');
+
+      try {
+        const response = await fetch(EXCEL_FILE_PATH);
+        if (!response.ok) {
+          throw new Error(`File "${EXCEL_FILE_PATH}" not found in current directory.`);
+        }
+
+        const dataBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(dataBuffer, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet);
+
+        if (!rows.length) {
+          statusMsg.textContent = 'No records found in book-150d.xlsx.';
+          return;
+        }
+
+        track.innerHTML = ''; // Clear loading message
+
+        // Process each title row sequentially
+        for (const row of rows) {
+          // Identify ISBN column regardless of header casing
+          const isbnRaw = row.ISBN || row.Isbn || row.isbn || row['ISBN Number'] || '';
+          const catalogLink = row.Link || row.link || row.URL || row.url || '#';
+
+          if (!isbnRaw) continue;
+
+          // Split cells containing multiple ISBNs (comma, semicolon, or space separated)
+          const isbnList = isbnRaw.toString().split(/[,;\s]+/);
+
+          // Find the first valid cover image for this title row
+          const validCoverUrl = await findValidSyndeticsCover(isbnList);
+
+          if (validCoverUrl) {
+            appendBookCard(validCoverUrl, catalogLink);
+          }
+        }
+
+        if (track.children.length === 0) {
+          track.innerHTML = '<div class="status-msg">No valid covers found for the listed ISBNs.</div>';
+          return;
+        }
+
+        // Initialize 2-second horizontal auto-rotation
+        startAutoRotation();
+
+      } catch (err) {
+        console.error(err);
+        statusMsg.textContent = `Error loading file "${EXCEL_FILE_PATH}". Verify the file is in the same directory.`;
+      }
+    }
+
+    // Pre-checks ISBNs in background to filter out Syndetics 1x1 blank placeholders
+    function findValidSyndeticsCover(isbnList) {
+      return new Promise(async (resolve) => {
+        for (let rawIsbn of isbnList) {
+          const cleanIsbn = rawIsbn.replace(/[^0-9X]/gi, '');
+          if (!cleanIsbn) continue;
+
+          const url = `https://www.syndetics.com/index.aspx?isbn=${cleanIsbn}/LC.GIF&client=${SYNDETICS_CLIENT_CODE}&type=xw12`;
+          
+          const isValid = await checkImageExists(url);
+          if (isValid) {
+            return resolve(url); // Exit loop immediately on first matched image
+          }
+        }
+        resolve(null); // No valid image found for this title
+      });
+    }
+
+    // Returns true if natural image width > 1px (filters 1x1 blank GIF)
+    function checkImageExists(url) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img.naturalWidth > 1);
+        img.onerror = () => resolve(false);
+        img.src = url;
+      });
+    }
+
+    // Renders card without bottom caption text
+    function appendBookCard(imgUrl, linkUrl) {
+      const track = document.getElementById('carouselTrack');
+      
+      const card = document.createElement('a');
+      card.className = 'book-card';
+      card.href = linkUrl;
+      card.target = linkUrl !== '#' ? '_blank' : '_self';
+      card.rel = 'noopener noreferrer';
+
+      card.innerHTML = `
+        <div class="book-cover-container">
+          <img class="book-cover-img" src="${imgUrl}" alt="Book Cover" loading="lazy" />
+        </div>
+      `;
+
+      track.appendChild(card);
+    }
+
+    // Horizontal Auto-Rotation Logic (Scrolls every 2 seconds)
+    function startAutoRotation() {
+      const track = document.getElementById('carouselTrack');
+      const container = document.getElementById('carouselContainer');
+
+      autoRotateInterval = setInterval(() => {
+        const firstCard = track.querySelector('.book-card');
+        if (!firstCard) return;
+
+        const cardWidth = firstCard.offsetWidth + 12; // Width + gap
+        const maxScroll = track.scrollWidth - track.clientWidth;
+
+        // Loop back to start if end reached
+        if (track.scrollLeft >= maxScroll - 10) {
+          track.scrollTo({ left: 0, behavior: 'smooth' });
+        } else {
+          track.scrollBy({ left: cardWidth, behavior: 'smooth' });
+        }
+      }, 2000);
+
+      // Pause rotation on mouse hover
+      container.addEventListener('mouseenter', stopAutoRotation);
+      container.addEventListener('mouseleave', startAutoRotation);
+    }
+
+    function stopAutoRotation() {
+      if (autoRotateInterval) {
+        clearInterval(autoRotateInterval);
+      }
+    }
+
+    // Run when DOM is ready
+    document.addEventListener('DOMContentLoaded', loadBooksAndBuildCarousel);
+  </script>
+</body>
+</html>
