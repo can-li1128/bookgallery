@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>New Books</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      background-color: #f8f9fa;
+    }
+    .status-container {
+      background: #fff;
+      padding: 15px 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-bottom: 25px;
+    }
+    #status {
+      font-weight: bold;
+      color: #0056b3;
+    }
+
+    /* Carousel Wrapper */
+    .carousel-wrapper {
+      display: none; /* Hidden until covers are loaded */
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      margin: 30px auto;
+      overflow: hidden;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      padding: 25px 15px;
+      box-sizing: border-box;
+    }
+    
+    /* Track holding all items horizontally */
+    .carousel-track {
+      display: flex;
+      gap: 15px;
+      transition: transform 0.5s ease-in-out;
+    }
+
+    /* Individual book card for 7-item display */
+    .book-card {
+      flex: 0 0 calc((100% - (15px * 6)) / 7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      padding: 5px;
+    }
+
+    /* Image Styling & Zoom on Hover */
+    .book-card img {
+      width: 100%;
+      height: 220px;
+      object-fit: contain;
+      border-radius: 4px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.18);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      cursor: pointer;
+    }
+
+    /* Enlarge image when hovered */
+    .book-card img:hover {
+      transform: scale(1.22);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>New Books</h2>
+
+  <div class="status-container">
+    <div id="status">Loading book data...</div>
+  </div>
+
+  <div class="carousel-wrapper" id="carouselWrapper">
+    <div class="carousel-track" id="carouselTrack"></div>
+  </div>
+
+  <script>
+    const EXCEL_FILE_PATH = 'url_book-150d.xlsx';
+    
+    let carouselInterval = null;
+    let currentIndex = 0;
+    let totalItems = 0;
+
+    // Load data automatically when page loads
+    window.addEventListener('DOMContentLoaded', loadExcelAndInitCarousel);
+
+    async function loadExcelAndInitCarousel() {
+      const status = document.getElementById('status');
+      const track = document.getElementById('carouselTrack');
+      const wrapper = document.getElementById('carouselWrapper');
+
+      try {
+        status.textContent = `Fetching ${EXCEL_FILE_PATH}...`;
+        
+        // Fetch the file locally from the same directory
+        const response = await fetch(EXCEL_FILE_PATH);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file (Status: ${response.status})`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const data = new Uint8Array(arrayBuffer);
+        
+        // Read Excel File
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        const rows = XLSX.utils.sheet_to_json(worksheet, { raw: false, defval: '' });
+
+        status.textContent = 'Processing book covers...';
+
+        const validCovers = [];
+
+        // Look for the img_url column and extract non-empty links
+        rows.forEach(row => {
+          const imgUrlKey = Object.keys(row).find(k => k.trim().toLowerCase() === 'img_url');
+          const imgUrl = imgUrlKey ? String(row[imgUrlKey]).trim() : '';
+
+          if (imgUrl) {
+            validCovers.push(imgUrl);
+          }
+        });
+
+        if (validCovers.length === 0) {
+          status.textContent = 'No image URLs found in the img_url column.';
+          return;
+        }
+
+        status.textContent = `Loaded ${validCovers.length} book cover(s).`;
+        wrapper.style.display = 'block';
+        totalItems = validCovers.length;
+
+        // Render book cover cards into track
+        validCovers.forEach((url) => {
+          const card = document.createElement('div');
+          card.className = 'book-card';
+          card.innerHTML = `<img src="${url}" alt="Book Cover" onError="this.onerror=null; this.parentElement.style.display='none';" />`;
+          track.appendChild(card);
+        });
+
+        // Pause rotation on mouse hover
+        wrapper.onmouseenter = stopCarousel;
+        wrapper.onmouseleave = startCarousel;
+
+        // Start auto-rotation
+        startCarousel();
+
+      } catch (err) {
+        console.error(err);
+        status.textContent = `Error loading Excel file: ${err.message}. Please ensure '${EXCEL_FILE_PATH}' exists in the same directory and is served via a local or web server.`;
+      }
+    }
+
+    function rotateCarousel() {
+      const track = document.getElementById('carouselTrack');
+      if (totalItems <= 7) return;
+
+      currentIndex = (currentIndex + 1) % (totalItems - 6);
+      const shiftPercent = currentIndex * (100 / 7 + (15 / 12)); 
+      track.style.transform = `translateX(-${shiftPercent}%)`;
+    }
+
+    function startCarousel() {
+      if (carouselInterval || totalItems <= 7) return;
+      carouselInterval = setInterval(rotateCarousel, 2000);
+    }
+
+    function stopCarousel() {
+      if (carouselInterval) {
+        clearInterval(carouselInterval);
+        carouselInterval = null;
+      }
+    }
+  </script>
+
+</body>
+</html>
