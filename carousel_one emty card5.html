@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>New Books</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      background-color: #f8f9fa;
+    }
+    .status-container {
+      background: #fff;
+      padding: 15px 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-bottom: 25px;
+    }
+    #status {
+      font-weight: bold;
+      color: #0056b3;
+    }
+
+    /* Carousel Wrapper */
+    .carousel-wrapper {
+      display: none; 
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      margin: 30px auto;
+      overflow: hidden;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      padding: 25px 15px;
+      box-sizing: border-box;
+    }
+    
+    /* Track holding all items horizontally */
+    .carousel-track {
+      display: flex;
+      gap: 15px;
+      transition: transform 0.5s ease-in-out;
+    }
+
+    /* Individual book card */
+    .book-card {
+      flex: 0 0 calc((100% - (15px * 6)) / 7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      padding: 5px;
+    }
+
+    .book-card img {
+      width: 100%;
+      height: 220px;
+      object-fit: contain;
+      border-radius: 4px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.18);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      cursor: pointer;
+    }
+
+    .book-card img:hover {
+      transform: scale(1.22);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>New Books</h2>
+
+  <div class="status-container">
+    <div id="status">Loading book data...</div>
+  </div>
+
+  <div class="carousel-wrapper" id="carouselWrapper">
+    <div class="carousel-track" id="carouselTrack"></div>
+  </div>
+
+  <script>
+    const EXCEL_FILE_PATH = 'url_book-150d.xlsx';
+    
+    let carouselInterval = null;
+    let currentIndex = 0;
+    let totalItems = 0; 
+
+    window.addEventListener('DOMContentLoaded', loadExcelAndInitCarousel);
+    window.addEventListener('resize', handleResize); // Fixes alignment if the window is resized
+
+    // Ensures track stays properly aligned on browser resize
+    function handleResize() {
+      const track = document.getElementById('carouselTrack');
+      if (totalItems <= 7 || !track) return;
+      
+      const firstCard = track.firstElementChild;
+      if (firstCard) {
+        const cardWidth = firstCard.offsetWidth;
+        const shiftPx = currentIndex * (cardWidth + 15);
+        track.style.transition = 'none'; 
+        track.style.transform = `translateX(-${shiftPx}px)`;
+      }
+    }
+
+    async function loadExcelAndInitCarousel() {
+      const status = document.getElementById('status');
+      const track = document.getElementById('carouselTrack');
+      const wrapper = document.getElementById('carouselWrapper');
+
+      try {
+        status.textContent = `Fetching ${EXCEL_FILE_PATH}...`;
+        
+        const response = await fetch(EXCEL_FILE_PATH);
+        if (!response.ok) throw new Error(`Failed to fetch file (Status: ${response.status})`);
+
+        const arrayBuffer = await response.arrayBuffer();
+        const data = new Uint8Array(arrayBuffer);
+        
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { raw: false, defval: '' });
+
+        status.textContent = 'Processing book covers...';
+        const validCovers = [];
+
+        rows.forEach(row => {
+          const imgUrlKey = Object.keys(row).find(k => k.trim().toLowerCase() === 'img_url');
+          const imgUrl = imgUrlKey ? String(row[imgUrlKey]).trim() : '';
+          if (imgUrl) validCovers.push(imgUrl);
+        });
+
+        if (validCovers.length === 0) {
+          status.textContent = 'No image URLs found in the img_url column.';
+          return;
+        }
+
+        status.textContent = `Loaded ${validCovers.length} book cover(s).`;
+        wrapper.style.display = 'block';
+        totalItems = validCovers.length;
+
+        // 1. Render all valid cover cards
+        validCovers.forEach((url) => {
+          const card = document.createElement('div');
+          card.className = 'book-card';
+          // Use visibility:hidden on error so the card spacing doesn't collapse
+          card.innerHTML = `<img src="${url}" alt="Book Cover" onError="this.style.visibility='hidden';" />`;
+          track.appendChild(card);
+        });
+
+        if (totalItems > 7) {
+          // 2. Add exactly ONE empty space (an invisible card) to signal the queue is ending
+          const emptySpacer = track.firstElementChild.cloneNode(true);
+          emptySpacer.style.visibility = 'hidden'; 
+          track.appendChild(emptySpacer);
+
+          // 3. Clone the first 7 cards and place them AFTER the empty space for the seamless loop
+          const clones = [];
+          for (let i = 0; i < 7; i++) {
+            clones.push(track.children[i].cloneNode(true));
+          }
+          clones.forEach(clone => track.appendChild(clone));
+        }
+
+        // Pause rotation on hover
+        wrapper.onmouseenter = stopCarousel;
+        wrapper.onmouseleave = startCarousel;
+        startCarousel();
+
+      } catch (err) {
+        console.error(err);
+        status.textContent = `Error loading Excel file: ${err.message}.`;
+      }
+    }
+
+    function rotateCarousel() {
+      const track = document.getElementById('carouselTrack');
+      if (totalItems <= 7) return;
+
+      currentIndex++;
+      
+      // Dynamically measure 1 card width + 15px gap to shift exactly 1 slot at a time
+      const firstCard = track.firstElementChild;
+      const cardWidth = firstCard.offsetWidth;
+      const shiftPx = currentIndex * (cardWidth + 15);
+
+      track.style.transition = 'transform 0.5s ease-in-out';
+      track.style.transform = `translateX(-${shiftPx}px)`;
+
+      // Reset sequence when we reach the clones (totalItems + 1 accounts for the single empty space)
+      if (currentIndex === totalItems + 1) {
+        setTimeout(() => {
+          track.style.transition = 'none'; // Disable transition for invisible rewind
+          currentIndex = 0;
+          track.style.transform = `translateX(0px)`; 
+          
+          void track.offsetWidth; // Force a browser reflow before next rotation
+        }, 500); 
+      }
+    }
+
+    function startCarousel() {
+      if (carouselInterval || totalItems <= 7) return;
+      carouselInterval = setInterval(rotateCarousel, 2000); // 2-second interval
+    }
+
+    function stopCarousel() {
+      if (carouselInterval) {
+        clearInterval(carouselInterval);
+        carouselInterval = null;
+      }
+    }
+  </script>
+
+</body>
+</html>
