@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Books</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <style>
+    :root {
+      --carousel-gap: 15px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      background-color: #f8f9fa;
+      color: #1f2933;
+    }
+
+    h1 {
+      margin: 0 0 20px;
+      font-size: 2rem;
+    }
+
+    .status-container {
+      background: #fff;
+      padding: 15px 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      margin-bottom: 25px;
+    }
+
+    #status {
+      font-weight: bold;
+      color: #0056b3;
+    }
+
+    /* Carousel wrapper */
+    .carousel-wrapper {
+      display: none;
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      margin: 30px auto;
+      overflow: hidden;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      padding: 25px 15px;
+    }
+
+    /* Track holding all items horizontally */
+    .carousel-track {
+      display: flex;
+      gap: var(--carousel-gap);
+      transition: transform 0.5s ease-in-out;
+      will-change: transform;
+    }
+
+    /* Individual book card */
+    .book-card {
+      flex: 0 0 calc((100% - (var(--carousel-gap) * 6)) / 7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 5px;
+    }
+
+    .book-card img {
+      width: 100%;
+      height: 220px;
+      object-fit: contain;
+      border-radius: 4px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.18);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      cursor: pointer;
+    }
+
+    .book-card img:hover {
+      transform: scale(1.22);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+      z-index: 10;
+    }
+
+    /* ============================================================
+       TV DISPLAY MODE
+       Activate with: ?mode=display
+       Example:
+       https://can-li1128.github.io/bookgallery/?mode=display
+       ============================================================ */
+
+    body.display-mode {
+      --carousel-gap: clamp(18px, 1.4vw, 30px);
+      width: 100vw;
+      height: 100vh;
+      margin: 0;
+      padding: clamp(32px, 4vh, 64px) clamp(48px, 5vw, 96px);
+      overflow: hidden;
+      background: #f8f9fa;
+      display: flex;
+      flex-direction: column;
+    }
+
+    body.display-mode h1 {
+      flex: 0 0 auto;
+      margin: 0 0 clamp(24px, 3vh, 48px);
+      font-size: clamp(2.5rem, 4vw, 5rem);
+      line-height: 1.05;
+      letter-spacing: -0.025em;
+    }
+
+    body.display-mode .status-container {
+      display: none;
+    }
+
+    body.display-mode .status-container.has-error {
+      display: block;
+      max-width: none;
+      margin: 0 0 24px;
+      box-shadow: none;
+      border: 2px solid #b42318;
+    }
+
+    body.display-mode .carousel-wrapper {
+      flex: 1 1 auto;
+      display: none;
+      width: 100%;
+      max-width: none;
+      min-height: 0;
+      margin: 0;
+      padding: clamp(32px, 4vh, 60px) clamp(24px, 2.5vw, 48px);
+      border-radius: clamp(12px, 1vw, 20px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    }
+
+    body.display-mode .carousel-track {
+      height: 100%;
+      align-items: center;
+    }
+
+    body.display-mode .book-card {
+      height: 100%;
+      padding: clamp(4px, 0.5vw, 10px);
+    }
+
+    body.display-mode .book-card img {
+      width: 100%;
+      height: min(68vh, 760px);
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.22);
+      cursor: default;
+      transition: none;
+    }
+
+    /* Disable hover enlargement on unattended TV display */
+    body.display-mode .book-card img:hover {
+      transform: none;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.22);
+    }
+
+    /* Keep content away from overscanned TV edges */
+    @media (min-aspect-ratio: 16/10) {
+      body.display-mode {
+        padding-left: max(64px, 4vw);
+        padding-right: max(64px, 4vw);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .carousel-track {
+        transition-duration: 0.01ms !important;
+      }
+
+      .book-card img {
+        transition: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>New Books</h1>
+
+  <div class="status-container" id="statusContainer">
+    <div id="status" role="status" aria-live="polite">Loading book data...</div>
+  </div>
+
+  <div class="carousel-wrapper" id="carouselWrapper" aria-label="New books carousel">
+    <div class="carousel-track" id="carouselTrack"></div>
+  </div>
+
+  <script>
+    const EXCEL_FILE_PATH = 'url_book-150d.xlsx';
+    const DISPLAY_MODE = new URLSearchParams(window.location.search).get('mode') === 'display';
+    const NORMAL_INTERVAL_MS = 2000;
+    const DISPLAY_INTERVAL_MS = 4000;
+
+    let carouselInterval = null;
+    let currentIndex = 0;
+    let totalItems = 0;
+
+    if (DISPLAY_MODE) {
+      document.body.classList.add('display-mode');
+    }
+
+    window.addEventListener('DOMContentLoaded', loadExcelAndInitCarousel);
+    window.addEventListener('resize', handleResize);
+
+    function getTrackGap(track) {
+      const styles = window.getComputedStyle(track);
+      const gap = parseFloat(styles.columnGap || styles.gap);
+      return Number.isFinite(gap) ? gap : 0;
+    }
+
+    // Ensures the track stays aligned when the browser or TV resolution changes.
+    function handleResize() {
+      const track = document.getElementById('carouselTrack');
+      if (totalItems <= 7 || !track) return;
+
+      const firstCard = track.firstElementChild;
+      if (firstCard) {
+        const cardWidth = firstCard.getBoundingClientRect().width;
+        const gap = getTrackGap(track);
+        const shiftPx = currentIndex * (cardWidth + gap);
+        track.style.transition = 'none';
+        track.style.transform = `translateX(-${shiftPx}px)`;
+      }
+    }
+
+    async function loadExcelAndInitCarousel() {
+      const status = document.getElementById('status');
+      const statusContainer = document.getElementById('statusContainer');
+      const track = document.getElementById('carouselTrack');
+      const wrapper = document.getElementById('carouselWrapper');
+
+      try {
+        status.textContent = `Fetching ${EXCEL_FILE_PATH}...`;
+
+        const response = await fetch(EXCEL_FILE_PATH);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file (Status: ${response.status})`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const data = new Uint8Array(arrayBuffer);
+
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { raw: false, defval: '' });
+
+        status.textContent = 'Processing book covers...';
+        const validCovers = [];
+
+        rows.forEach(row => {
+          const imgUrlKey = Object.keys(row).find(
+            k => k.trim().toLowerCase() === 'img_url'
+          );
+          const imgUrl = imgUrlKey ? String(row[imgUrlKey]).trim() : '';
+          if (imgUrl) validCovers.push(imgUrl);
+        });
+
+        if (validCovers.length === 0) {
+          throw new Error('No image URLs found in the img_url column.');
+        }
+
+        status.textContent = `Loaded ${validCovers.length} book cover(s).`;
+        totalItems = validCovers.length;
+
+        validCovers.forEach((url, index) => {
+          const card = document.createElement('div');
+          card.className = 'book-card';
+
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = `Book cover ${index + 1}`;
+          img.loading = DISPLAY_MODE ? 'eager' : 'lazy';
+          img.decoding = 'async';
+          img.addEventListener('error', () => {
+            img.style.visibility = 'hidden';
+          });
+
+          card.appendChild(img);
+          track.appendChild(card);
+        });
+
+        if (totalItems > 7) {
+          // One invisible spacer signals the end before the loop restarts.
+          const emptySpacer = track.firstElementChild.cloneNode(true);
+          emptySpacer.style.visibility = 'hidden';
+          emptySpacer.setAttribute('aria-hidden', 'true');
+          track.appendChild(emptySpacer);
+
+          // Clone the first seven cards after the spacer for a seamless loop.
+          const clones = [];
+          for (let i = 0; i < 7; i++) {
+            const clone = track.children[i].cloneNode(true);
+            clone.setAttribute('aria-hidden', 'true');
+            clones.push(clone);
+          }
+          clones.forEach(clone => track.appendChild(clone));
+        }
+
+        wrapper.style.display = 'block';
+
+        // Hover pause is useful on the normal webpage but undesirable on a TV.
+        if (!DISPLAY_MODE) {
+          wrapper.addEventListener('mouseenter', stopCarousel);
+          wrapper.addEventListener('mouseleave', startCarousel);
+        }
+
+        startCarousel();
+
+      } catch (err) {
+        console.error(err);
+        status.textContent = `Error loading book data: ${err.message}`;
+        statusContainer.classList.add('has-error');
+      }
+    }
+
+    function rotateCarousel() {
+      const track = document.getElementById('carouselTrack');
+      if (totalItems <= 7 || !track) return;
+
+      currentIndex++;
+
+      const firstCard = track.firstElementChild;
+      const cardWidth = firstCard.getBoundingClientRect().width;
+      const gap = getTrackGap(track);
+      const shiftPx = currentIndex * (cardWidth + gap);
+
+      track.style.transition = 'transform 0.5s ease-in-out';
+      track.style.transform = `translateX(-${shiftPx}px)`;
+
+      // totalItems + 1 accounts for the single empty spacer.
+      if (currentIndex === totalItems + 1) {
+        setTimeout(() => {
+          track.style.transition = 'none';
+          currentIndex = 0;
+          track.style.transform = 'translateX(0px)';
+          void track.offsetWidth;
+        }, 500);
+      }
+    }
+
+    function startCarousel() {
+      if (carouselInterval || totalItems <= 7) return;
+
+      const interval = DISPLAY_MODE
+        ? DISPLAY_INTERVAL_MS
+        : NORMAL_INTERVAL_MS;
+
+      carouselInterval = setInterval(rotateCarousel, interval);
+    }
+
+    function stopCarousel() {
+      if (carouselInterval) {
+        clearInterval(carouselInterval);
+        carouselInterval = null;
+      }
+    }
+
+    // If a TV browser restores the page from its back-forward cache,
+    // ensure the automatic rotation resumes.
+    window.addEventListener('pageshow', () => {
+      if (DISPLAY_MODE && totalItems > 7) {
+        startCarousel();
+      }
+    });
+  </script>
+
+</body>
+</html>
