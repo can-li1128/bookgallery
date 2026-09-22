@@ -1,6 +1,7 @@
 # bookgallery #
-This project serves as the sandbox for digital book display ideas include code at different stages that exposes issues.
+Code files and Excel files for several digital book display ideas.
 
-- carousel_onespace leaves one space between loops, signal the end of the queue in each roation
-- carousel_rewinding rewinds images right-to-left at the end of the queue
-- carousel_slow retrieves cover images real time. It takes up to two minutes to load the page and starts rotating.
+- index is the carousel design with accessibility features and responsiveness for screen sizes, so best used for webpages. It reads the Excel file book-150d.xlsx. 
+- carousel_onespace is similar to the index.html but without the control buttons. It leaves one space between loops, signal the end of the queue in each rotation.    Best for digital display without user interaction.
+- bento is the bento grid design that read Excel file california-books.xlsx.
+
